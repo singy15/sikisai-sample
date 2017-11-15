@@ -1,10 +1,10 @@
 
 (in-package :cl-user)
-(defpackage mir-sample-asd
+(defpackage sikisai-sample-asd
   (:use :cl :asdf))
-(in-package :mir-sample-asd)
+(in-package :sikisai-sample-asd)
 
-(defsystem mir-sample
+(defsystem sikisai-sample
   :depends-on (:cl-opengl :cl-glut :cl-glu)
   :components (
     (:module "src"
@@ -16,6 +16,6 @@
           ; (declaim (optimize (speed 3) (debug 0) (safety 0)))
 					(funcall thunk))
       :components (
-        (:file "mir")
-        (:file "mir-sample")))))
+        (:file "sikisai")
+        (:file "sikisai-sample")))))
 

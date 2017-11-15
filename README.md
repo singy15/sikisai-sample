@@ -1,19 +1,19 @@
 
-# Mir-sample
+# Sikisai-sample
 
 ## 概要
 
-グラフィックスライブラリ[Mir](https://github.com/singy15/mir)のデモです。  
+グラフィックスライブラリ[Sikisai](https://github.com/singy15/sikisai)のデモです。  
 
 ## 起動方法
 
 ```
 cd ~/quicklisp/local-projects
-git clone https://github.com/singy15/mir-sample.git
-cd mir-sample
+git clone https://github.com/singy15/sikisai-sample.git
+cd sikisai-sample
 sbcl
-(ql:quickload :mir-sample)
-(mir-sample:main)
+(ql:quickload :sikisai-sample)
+(sikisai-sample:main)
 ```
 
 * Windowsユーザの方は同梱のfreeglut.dllが使えます
