@@ -31,7 +31,8 @@
   (setf *tex-cat-move* (make-instance 'sik:texture 
                                       :path "./resource/cat-move.raw" 
                                       :width 64 
-                                      :height 64)))
+                                      :height 64
+																			:intrpl :nearest)))
 
 (defun clear ()
   (sik:clear :r 0.3 :g 0.3 :b 0.3))
