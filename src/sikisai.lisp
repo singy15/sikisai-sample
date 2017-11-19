@@ -12,18 +12,18 @@
     :+bitmap-helvetica-18+
     :+stroke-roman+
     :+stroke-mono-roman+
-		:texture
-		:width
-		:height
-		:id
-		:window
+    :texture
+    :width
+    :height
+    :id
+    :window
     :user-initialize
     :user-idle
     :user-display
     :user-finalize
-		:current
-		:get-width
-		:get-height
+    :current
+    :get-width
+    :get-height
     :get-key-down
     :get-key-push
     :get-mouse-down
@@ -55,6 +55,7 @@
 
 ;; Variables.
 (defparameter *window* nil)
+(defparameter *raw-buffers* (list))
 
 ;; texture class.
 (defclass texture () 
@@ -64,36 +65,40 @@
    (height
      :accessor height
      :initarg :height)
-	 (raw
-		 :accessor raw
-		 :initarg :raw)
+   (raw-pnt
+     :accessor raw-pnt)
    (id
      :accessor id
      :initarg :id)))
 
 ;; Ctor texture.
 (defmethod initialize-instance :around ((this texture) &key path width height)
-	(call-next-method)
+  (call-next-method)
   (gl:pixel-store :unpack-alignment 1)
-	(let ((id (car (gl:gen-textures 1))))
-		(setf (id this) id)
-		(gl:bind-texture :texture-2d id)
-		(gl:tex-parameter :texture-2d :texture-min-filter :nearest)
-		(gl:tex-parameter :texture-2d :texture-mag-filter :nearest)
-		(gl:tex-image-2d :texture-2d 0 :rgba width height 0 :rgba :unsigned-byte (load-raw path width height))
-		this))
+  (let ((id (car (gl:gen-textures 1)))
+        (raw-pnt (load-raw path width height)))
+    (setf (id this) id)
+    (gl:bind-texture :texture-2d id)
+    (gl:tex-parameter :texture-2d :texture-min-filter :nearest)
+    (gl:tex-parameter :texture-2d :texture-mag-filter :nearest)
+    (gl:tex-image-2d :texture-2d 0 :rgba (float width) (float height) 0 :rgba :unsigned-byte raw-pnt)
+    (setf (raw-pnt this) raw-pnt)
+    (setf (width this) (float width))
+    (setf (height this) (float height))
+    (push this *raw-buffers*)
+    this))
 
 ;; window class.
 (defclass window (glut:window) 
   ((tm-frame 
-		 :accessor tm-frame
-		 :initform 0)
-	 (tm-next-frame
-		 :accessor tm-next-frame
-		 :initform 0)
-	 (fps
-		 :accessor fps
-		 :initform 60
+     :accessor tm-frame
+     :initform 0)
+   (tm-next-frame
+     :accessor tm-next-frame
+     :initform 0)
+   (fps
+     :accessor fps
+     :initform 60
      :initarg :fps)
    (keys
      :accessor keys
@@ -132,10 +137,10 @@
    (mouse-right-push-old
      :accessor mouse-right-push-old
      :initform nil)
-	 (double-buffer-enabled
-		 :accessor double-buffer-enabled
-		 :initform nil))
-	(:default-initargs 
+   (double-buffer-enabled
+     :accessor double-buffer-enabled
+     :initform nil))
+  (:default-initargs 
     :title "sikisai"
     :mode '(:double :rgb :depth)
     :width 400
@@ -143,10 +148,10 @@
 
 ;; Ctor window.
 (defmethod initialize-instance :around ((this window) &key mode)
-	(call-next-method)
-	(setf (double-buffer-enabled this) (member :double mode))
-	(setf *window* this)
-	this)
+  (call-next-method)
+  (setf (double-buffer-enabled this) (member :double mode))
+  (setf *window* this)
+  this)
 
 ;; User functions.
 (defmethod user-initialize ((this window)) nil)
@@ -156,15 +161,15 @@
 
 ;; Get current window.
 (defun current ()
-	*window*)
+  *window*)
 
 ;; Get current window width.
 (defun get-width ()
-	(glut:width *window*))
+  (glut:width *window*))
 
 ;; Get current window height.
 (defun get-height ()
-	(glut:height *window*))
+  (glut:height *window*))
 
 ;; Load RAW image.
 (defun load-raw (path width height)
@@ -298,8 +303,10 @@
 ;; Reshape.
 (defmethod glut:reshape ((this window) width height)
   (gl:viewport 0 0 width height)
+  (gl:matrix-mode :projection)
   (gl:load-identity)
-  (glu:ortho-2d 0.0 width height 0.0))
+  (glu:ortho-2d 0.0 width height 0.0)
+  (gl:matrix-mode :modelview))
 
 ;; Draw.
 (defmethod glut:display ((this window))
@@ -309,17 +316,25 @@
   (set-key-push-state this)
   (fps-control this #'user-display)
   (if (double-buffer-enabled this) 
-		(glut:swap-buffers)
-		(gl:flush)))
+    (glut:swap-buffers)
+    (gl:flush)))
 
 ;; Idle.
 (defmethod glut:idle ((this window))
   (user-idle this)
   (glut:post-redisplay))
 
+;; Free RAW image buffer.
+(defun free-raw-buffer ()
+  (mapc (lambda (p)
+          (cffi:foreign-free (raw-pnt p)))
+        *raw-buffers*)
+  (setf *raw-buffers* (list)))
+
 ;; Close.
 (defmethod glut:close ((this window))
-  (user-finalize this))
+  (user-finalize this)
+  (free-raw-buffer))
 
 ;; Start main loop.
 (defmethod display-window ((this window))
@@ -386,15 +401,22 @@
   (unset-draw-param w r g b a aa))
 
 ;; Draw circle.
-(defun circle (x y radius n-div &key (w 1.0) (r 1.0) (g 1.0) (b 1.0) (a nil) (aa t))
+(defun circle (x y radius n-div &key (w 1.0) (r 1.0) (g 1.0) (b 1.0) (a nil) (aa t) (f nil))
   (let* ((n n-div)
          (ptheta (/ (* 2.0 PI) n)))
-     (loop for i from 0 below n do
+     (if f
+       (let ((pnts (list)))
+         (loop for i from 0 below n do
+               (push (list (+ x (* radius (cos (* i ptheta))))
+                           (+ y (* radius (sin (* i ptheta)))))
+                     pnts))
+         (sik:poly pnts :w w :r r :g g :b b :a a :aa aa))
+       (loop for i from 0 below n do
            (sik:line (+ x (* radius (cos (* i ptheta))))
                      (+ y (* radius (sin (* i ptheta))))
                      (+ x (* radius (cos (* (+ i 1) ptheta))))
                      (+ y (* radius (sin (* (+ i 1) ptheta))))
-                     :w w :aa aa :r r :g g :b b :a a))))
+                     :w w :aa aa :r r :g g :b b :a a)))))
 
 ;; Draw polygon.
 (defun poly (pnts &key (w 1.0) (r 1.0) (g 1.0) (b 1.0) (a nil) (aa t))
@@ -405,30 +427,36 @@
   (unset-draw-param w r g b a aa))
 
 ;; Draw image.
-(defun image (texture x y &key (a nil) (sx 1.0) (sy 1.0))
+(defun image (texture x y &key (a nil) (sx 1.0) (sy 1.0) (rt 0.0) (r 1.0) (g 1.0) (b 1.0))
   (gl:push-matrix)
-  (gl:pixel-store :unpack-alignment 1)
+  (gl:load-identity)
+  (gl:translate x y 0.0)
+  (gl:rotate (* (/ (mod rt (* 2.0 PI)) (* 2.0 PI)) 360.0) 0.0 0.0 1.0)
+  (gl:scale sx sy 0.0)
+  
   (gl:bind-texture :texture-2d (id texture))
-  (gl:raster-pos 0 0)
   (gl:enable :texture-2d)
   (when a 
     (gl:enable :blend)
     (gl:blend-func :src-alpha :one-minus-src-alpha))
-  (gl:color 1.0 1.0 1.0 (if a a 1.0))
-  (let ((hw (/ (* sx (width texture)) 2.0))
-        (hh (/ (* sy (height texture)) 2.0))) 
+  (gl:color r g b (if a a 1.0))
+  
+  (let ((hw (/ (width texture) 2.0))
+        (hh (/ (height texture) 2.0))) 
     (gl:with-primitive :quads
     (gl:tex-coord 0 0)
-    (gl:vertex (- x hw) (- y hh) 0)
+    (gl:vertex (- hw) (- hh) 0)
     (gl:tex-coord 1 0)
-    (gl:vertex (+ x hw) (- y hh) 0)
+    (gl:vertex (+ hw) (- hh) 0)
     (gl:tex-coord 1 1)
-    (gl:vertex (+ x hw) (+ y hh) 0)
+    (gl:vertex (+ hw) (+ hh) 0)
     (gl:tex-coord 0 1)
-    (gl:vertex (- x hw) (+ y hh) 0)))
+    (gl:vertex (- hw) (+ hh) 0)))  
+  
   (when a
     (gl:disable :blend))
   (gl:disable :texture-2d)
+  
   (gl:pop-matrix))
 
 ;; Draw string with bitmap character.
