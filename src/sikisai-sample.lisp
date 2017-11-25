@@ -28,10 +28,8 @@
 (defparameter *goodies-c* (make-list *goodies-n* :initial-element 0.0))
 (defparameter *goodies-x* (make-list *goodies-n* :initial-element 0.0))
 (defparameter *goodies-y* (make-list *goodies-n* :initial-element 0.0))
-(defparameter *goodies-z* (make-list *goodies-n* :initial-element 0.0))
-(defparameter *plane-x* 1.0)
-(defparameter *plane-y* 0.0)
-(defparameter *plane-z* 0.0)
+(defparameter *goodies-z* (make-list *goodies-n* :initial-element 9999.0))
+(defparameter *dxf-model* nil)
 
 (defclass window (sik:window) ())
 
@@ -45,14 +43,10 @@
                                       :width 64 
                                       :height 64
                                       :intrpl :nearest))
-  
-  (sik:enable :light0)
-  (sik:light :light0 :position (list 0.0 2.0 2.0 1.0))
-  (sik:light :light0 :diffuse '(1.0 1.0 1.0 0))
-  (sik:light :light0 :quadratic-attenuation 0.005))
+  (setf *dxf-model* (sik:load-dxf "./resource/ship.dxf" )))
 
 (defun clear ()
-  (sik:clear :r 0.3 :g 0.3 :b 0.3))
+  (sik:clear :r 0.2 :g 0.2 :b 0.2))
 
 (defun draw-sikisai ()
   (sik:texts "SIKISAI" (- +hw+ 40.0) (+ +hh+ 100.0) :r 1.0 :g 1.0 :b 1.0 :sx 1.0 :sy 5.0 :aa t :a 1.0))
@@ -84,7 +78,7 @@
     (sik:line (- +hw+ l) (+ (- +hh+ l) fix-y) (+ +hw+ l) (+ +hh+ fix-y) :w 2.0 :aa t :a 1.0)
     (sik:line (- +hw+ l) (+ (+ +hh+ l) fix-y) (+ +hw+ l) (+ +hh+ fix-y) :w 2.0 :aa t :a 1.0)
     (loop for i from n-min below n-max do 
-          (multiple-value-bind (r g b) (hsv2rgb (* phue (- i n-min)) 1.0 1.0)
+          (multiple-value-bind (r g b) (hsv2rgb (mod (floor (- (/ *tm* 2) (* phue (- i n-min)))) 360) 1.0 1.0)
             (sik:poly `((,(+ +hw+ l) ,(+ +hh+ fix-y))
                         (,(+ +hw+ (* l (cos (* i ptheta)))) ,(+ +hh+ (* l (sin (* i ptheta))) fix-y))
                         (,(+ +hw+ (* l (cos (* (+ i 1) ptheta)))) ,(+ +hh+ (* l (sin (* (+ i 1) ptheta))) fix-y)))
@@ -104,8 +98,6 @@
   (when (equal (random 10) 0)
     (loop for i from 0 below 20 do
         (sik:point (random (sik:get-width)) (random (sik:get-height)) :s 2.0 :r 1.0 :g 1.0 :b 1.0 :a 1.0 :aa t))))
-
-
 
 (defun draw-cat ()
   (when (sik:get-key-down #\w)
@@ -196,37 +188,56 @@
                       ((equal :torus (nth i *goodies-shape*)) (sik:torus3 0.1 0.2 20 20 :r r :g g :b b))
                       (t nil)))))))
 
-(defun draw-plane ()
-  (when (sik:get-key-down #\w)
-    (incf *plane-y* 0.05))
-  (when (sik:get-key-down #\s)
-    (decf *plane-y* 0.05))
-  (when (sik:get-key-down #\a)
-    (decf *plane-x* 0.05))
-  (when (sik:get-key-down #\d)
-    (incf *plane-x* 0.05))
+(defun draw-bit ()
   (sik:local
-    (sik:translate *plane-x* *plane-y* *plane-z*)
-    (sik:rotate *tm* 0.0 0.0 1.0)
+      (sik:rotate (* *tm* 2.0) 0.0 0.0 1.0)
+      (sik:scale 0.5 0.5 0.5)
+      (sik:poly3 '((0.0 0.0 0.0)
+                   (-0.2 0.0 1.0)
+                   (0.2 0.0 1.0))
+                 :r 1.0 :g 0.0 :b 0.0 :both t)
+      (sik:poly3 '((0.0 0.0 0.0)
+                   (0.0 -0.2 1.0) 
+                   (0.0 0.2 1.0))
+                 :r 1.0 :g 0.0 :b 0.0 :both t)))
+
+(defun draw-model ()
+  (sik:local
+    (sik:translate (+ 0.5 (/ (sin (/ *tm* 100.0)) 2.0)) 0.0 2.0)
+    (sik:rotate (* 20.0 (sin (/ *tm* 100.0))) 0.0 0.0 1.0)
+    (sik:rotate (* 10.0 (sin (/ *tm* 100.0))) 0.0 1.0 0.0)
+    (sik:rotate 90 1.0 0.0 0.0)
     (sik:local
-      (sik:poly3 '((0.0 0.0 0.0)
-                   (-0.3 0.0 1.0)
-                   (0.3 0.0 1.0))
-                 :both t)
-      (sik:poly3 '((0.0 0.0 0.0)
-                   (0.0 -0.3 1.0) 
-                   (0.0 0.0 1.0))
-                 :both t))))
+      (sik:model3 *dxf-model* :r 0.9 :g 0.8 :b 0.8 :a 1.0)
+      (sik:translate 0.0 0.9 0.0)
+      (sik:disable :lighting)
+      (loop for i from 0 below 5 do
+            (sik:local
+              (sik:translate (/ (random 1.0) 20.0) (/ (random 1.0) 20.0) (/ (random 1.0) 20.0))
+              (sik:sphere3 0.08 20 20 :r 1.0 :g 1.0 :b 0.8 :a 0.5)))
+      (sik:enable :lighting)))
+  (sik:local
+    (sik:translate -0.9 0.0 0.0)
+    (sik:translate (+ 0.5 (/ (sin (/ *tm* 100.0)) 2.0)) 0.0 2.0)
+    (draw-bit))
+  (sik:local
+    (sik:translate 0.9 0.0 0.0)
+    (sik:translate (+ 0.5 (/ (sin (/ *tm* 100.0)) 2.0)) 0.0 2.0)
+    (draw-bit)))
 
 (defmethod sik:user-display ((this window))
   (incf *tm*)
   (clear)
 
   (sik:set-camera -2.0 3.0 8.0 0.0 0.0 0.0 0.0 1.0 0.0)
+  (sik:enable :light0)
+  (sik:light :light0 :position (list 0.0 5.0 6.0 1.0))
+  (sik:light :light0 :diffuse '(1.0 1.0 1.0 0))
+  (sik:light :light0 :quadratic-attenuation 0.004)
   
-  (draw-plane)
   (draw-binary)
   (draw-goodies)
+  (draw-model)
 
   (draw-sikisai)
   (draw-sikisai-logo)
