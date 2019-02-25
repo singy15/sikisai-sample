@@ -33,17 +33,22 @@
 
 (defclass window (sik:window) ())
 
+(defun get-resource-path (rel-path)
+  (asdf:system-relative-pathname 'sikisai-sample rel-path))
+
 (defmethod sik:user-initialize ((this window))
-  (setf *tex-cat* (make-instance 'sik:texture 
-                                 :path "./resource/cat.raw" 
-                                 :width 64 
-                                 :height 64))
-  (setf *tex-cat-move* (make-instance 'sik:texture 
-                                      :path "./resource/cat-move.raw" 
-                                      :width 64 
-                                      :height 64
-                                      :intrpl :nearest))
-  (setf *dxf-model* (sik:load-dxf "./resource/ship.dxf" )))
+  (setf *tex-cat* 
+        (make-instance 'sik:texture 
+                       :path (get-resource-path "resource/cat.raw")
+                       :width 64 
+                       :height 64))
+  (setf *tex-cat-move* 
+        (make-instance 'sik:texture 
+                       :path (get-resource-path "resource/cat-move.raw")
+                       :width 64 
+                       :height 64
+                       :intrpl :nearest))
+  (setf *dxf-model* (sik:load-dxf (get-resource-path "resource/ship.dxf"))))
 
 (defun clear ()
   (sik:clear :r 0.2 :g 0.2 :b 0.2))
