@@ -2,32 +2,35 @@
 ;; Package sik.
 (defpackage sik
   (:use :cl :cl-user)
-  (:import-from gl 
-                translate
-                rotate
-                scale
-                load-identity
-                push-matrix
-                pop-matrix
-                matrix-mode
-                shade-model
-                light
-                material
-                enable
-                disable)
-  (:import-from glu
-                look-at)
-  (:import-from glut
-                solid-cube
-                solid-sphere
-                solid-torus
-                solid-cone
-                solid-teapot
-                wire-cube
-                wire-sphere
-                wire-torus
-                wire-cone
-                wire-teapot)
+  (:import-from 
+    gl 
+    translate
+    rotate
+    scale
+    load-identity
+    push-matrix
+    pop-matrix
+    matrix-mode
+    shade-model
+    light
+    material
+    enable
+    disable)
+  (:import-from 
+    glu
+    look-at)
+  (:import-from 
+    glut
+    solid-cube
+    solid-sphere
+    solid-torus
+    solid-cone
+    solid-teapot
+    wire-cube
+    wire-sphere
+    wire-torus
+    wire-cone
+    wire-teapot)
   (:export
     :+bitmap-8-by-13+
     :+bitmap-9-by-15+
@@ -39,6 +42,7 @@
     :+stroke-roman+
     :+stroke-mono-roman+
     :local
+    :raw
     :texture
     :width
     :height
@@ -48,9 +52,11 @@
     :user-idle
     :user-display
     :user-finalize
+    :user-mouse-wheel
     :current
     :get-width
     :get-height
+    :load-raw
     :get-key-down
     :get-key-push
     :get-mouse-down
@@ -59,7 +65,7 @@
     :get-mouse-y
     :display-window
     :to-rad
-    :to-det
+    :to-deg
     :cross
     :norm
     :set-camera
@@ -83,6 +89,7 @@
     :texts3
     :load-dxf
     :model3
+    :image3
 
     ;; Imported symbols.
     :look-at
@@ -152,6 +159,19 @@
      ,@body
      (gl:pop-matrix)))
 
+; raw class.
+(defclass raw () 
+  ((width
+     :accessor width
+     :initarg :width)
+   (height
+     :accessor height
+     :initarg :height)
+   (bytes
+     :accessor bytes
+     :initarg :bytes
+     :initform nil)))
+
 ;; texture class.
 (defclass texture () 
   ((width
@@ -167,19 +187,19 @@
      :initarg :id)))
 
 ;; Ctor texture.
-(defmethod initialize-instance :around ((this texture) &key path width height (intrpl :linear))
+(defmethod initialize-instance :around ((this texture) &key (path nil) (width nil) (height nil) (intrpl :linear) (src nil))
   (call-next-method)
   (gl:pixel-store :unpack-alignment 1)
-  (let ((id (car (gl:gen-textures 1)))
-        (raw-pnt (load-raw path width height)))
+  (let* ((id (car (gl:gen-textures 1)))
+         (raw (if src src (load-raw path width height))))
     (setf (id this) id)
     (gl:bind-texture :texture-2d id)
     (gl:tex-parameter :texture-2d :texture-min-filter intrpl)
     (gl:tex-parameter :texture-2d :texture-mag-filter intrpl)
-    (gl:tex-image-2d :texture-2d 0 :rgba (float width) (float height) 0 :rgba :unsigned-byte raw-pnt)
-    (setf (raw-pnt this) raw-pnt)
-    (setf (width this) (float width))
-    (setf (height this) (float height))
+    (gl:tex-image-2d :texture-2d 0 :rgba (float (width raw)) (float (height raw)) 0 :rgba :unsigned-byte (bytes raw))
+    (setf (raw-pnt this) (bytes raw))
+    (setf (width this) (float (width raw)))
+    (setf (height this) (float (height raw)))
     (push this *raw-buffers*)
     this))
 
@@ -280,6 +300,7 @@
 (defmethod user-idle ((this window)) nil)
 (defmethod user-display ((this window)) nil)
 (defmethod user-finalize ((this window)) nil)
+(defmethod user-mouse-wheel ((this window) direction) nil)
 
 ;; Get current window.
 (defun current ()
@@ -299,7 +320,7 @@
         (image (alexandria:read-file-into-byte-vector path)))
       (loop for i from 0 to (1- (length image)) do
             (setf (cffi:mem-aref texture '%gl:ubyte i) (aref image i)))
-      texture))
+      (make-instance 'raw :bytes texture :width width :height height)))
 
 ;; Create hash-table to store key state.
 (defun create-key-state-table (keys)
@@ -385,10 +406,17 @@
 
 ;; Mouse.
 (defmethod glut:mouse ((this window) button state x y)
-  (setf (mouse-left-down this) (and (equal button :LEFT-BUTTON) (equal state :DOWN)))
-  (setf (mouse-left-push this) (and (equal button :LEFT-BUTTON) (equal state :DOWN)))
-  (setf (mouse-right-down this) (and (equal button :RIGHT-BUTTON) (equal state :DOWN)))
-  (setf (mouse-right-push this) (and (equal button :RIGHT-BUTTON) (equal state :DOWN))))
+  (when (equal button :LEFT-BUTTON)
+    (setf (mouse-left-down this) (equal state :DOWN))
+    (setf (mouse-left-push this) (equal state :DOWN)))
+  (when (equal button :RIGHT-BUTTON)
+    (setf (mouse-right-down this) (equal state :DOWN))
+    (setf (mouse-right-push this) (equal state :DOWN)) ))
+
+;; Mouse wheel.
+(if (fboundp 'glut:mouse-wheel-func)
+	(defmethod glut:mouse-wheel ((this window) wheel-number direction x y)
+		(user-mouse-wheel this direction)))
 
 ;; Mouse passive motion.
 (defmethod glut:passive-motion ((this window) x y)
@@ -576,40 +604,75 @@
   (sik:look-at cam-x cam-y cam-z at-x at-y at-z axis-x axis-y axis-z))
 
 ;; Draw point.
-(defun point (x y &key (s 1.0) (r 1.0) (g 1.0) (b 1.0) (a nil) (aa t))
+(defun point (x y &key (s 1.0) (r 1.0) (g 1.0) (b 1.0) (a nil) (aa t) (z nil))
   (render-2d
     (set-draw-param nil r g b a aa)
+
+    ; z-buffer support (experimental).
+    (when z
+      (gl:enable :depth-test))
+    
     (gl:point-size s)
     (gl:begin :points)
-    (gl:vertex x y 0.0)
+    (gl:vertex x y (if z z 0.0))
     (gl:end)
+
+    ; z-buffer support (experimental).
+    (when z
+      (gl:disable :depth-test))
+
     (unset-draw-param nil r g b a aa)))
 
 ;; Draw line.
-(defun line (x y x2 y2 &key (w 1.0) (r 1.0) (g 1.0) (b 1.0) (a nil) (aa t))
+(defun line (x y x2 y2 &key (w 1.0) (r 1.0) (g 1.0) (b 1.0) (a nil) (aa t) (z nil))
   (render-2d
     (set-draw-param w r g b a aa)
+
+    ; z-buffer support (experimental).
+    (when z
+      (gl:enable :depth-test))
+    
     (gl:begin :lines)
-    (gl:vertex x y 0.0)
-    (gl:vertex x2 y2 0.0)
+    (gl:vertex x y (if z z 0.0))
+    (gl:vertex x2 y2 (if z z 0.0))
     (gl:end)
+
+    ; z-buffer support (experimental).
+    (when z
+      (gl:disable :depth-test))
+    
     (unset-draw-param w r g b a aa)))
 
 ;; Draw rect.
-(defun rect (x y x2 y2 &key (w 1.0) (r 1.0) (g 1.0) (b 1.0) (a nil) (aa t))
+(defun rect (x y x2 y2 &key (w 1.0) (r 1.0) (g 1.0) (b 1.0) (a nil) (aa t) (z nil))
   (render-2d
     (set-draw-param w r g b a aa)
+
+    ; z-buffer support (experimental).
+    (when z
+      (gl:enable :depth-test))
+    
     (gl:begin :polygon)
-    (gl:vertex x y 0.0)
-    (gl:vertex x2 y 0.0)
-    (gl:vertex x2 y2 0.0)
-    (gl:vertex x y2 0.0)
+    (gl:vertex x y (if z z 0.0))
+    (gl:vertex x2 y (if z z 0.0))
+    (gl:vertex x2 y2 (if z z 0.0))
+    (gl:vertex x y2 (if z z 0.0))
     (gl:end)
+
+    ; z-buffer support (experimental).
+    (when z
+      (gl:disable :depth-test))
+    
     (unset-draw-param w r g b a aa)))
 
 ;; Draw circle.
-(defun circle (x y radius n-div &key (w 1.0) (r 1.0) (g 1.0) (b 1.0) (a nil) (aa t) (f nil))
+(defun circle (x y radius n-div &key (w 1.0) (r 1.0) (g 1.0) (b 1.0) (a nil) (aa t) (f nil) (z nil))
   (render-2d
+
+    ; z-buffer support (experimental).
+    (when z
+      (gl:enable :depth-test))
+    
     (let* ((n n-div)
            (ptheta (/ (* 2.0 PI) n)))
        (if f
@@ -618,38 +681,64 @@
                  (push (list (+ x (* radius (cos (* i ptheta))))
                              (+ y (* radius (sin (* i ptheta)))))
                        pnts))
-           (sik:poly pnts :w w :r r :g g :b b :a a :aa aa))
+           (sik:poly pnts :w w :r r :g g :b b :a a :aa aa :z z))
          (loop for i from 0 below n do
              (sik:line (+ x (* radius (cos (* i ptheta))))
                        (+ y (* radius (sin (* i ptheta))))
                        (+ x (* radius (cos (* (+ i 1) ptheta))))
                        (+ y (* radius (sin (* (+ i 1) ptheta))))
-                       :w w :aa aa :r r :g g :b b :a a))))))
+                       :w w :aa aa :r r :g g :b b :a a :z z))))
+    
+    ; z-buffer support (experimental).
+    (when z
+      (gl:disable :depth-test))))
 
 ;; Draw polygon.
-(defun poly (pnts &key (w 1.0) (r 1.0) (g 1.0) (b 1.0) (a nil) (aa t))
+(defun poly (pnts &key (w 1.0) (r 1.0) (g 1.0) (b 1.0) (a nil) (aa t) (z nil))
   (render-2d 
     (set-draw-param w r g b a aa)
+
+    ; z-buffer support (experimental).
+    (when z
+      (gl:enable :depth-test))
+    
     (gl:begin :polygon)
-    (mapc (lambda (p) (gl:vertex (car p) (cadr p) 0.0)) pnts)
+    (mapc (lambda (p) (gl:vertex (car p) (cadr p) (if z z 0.0))) pnts)
     (gl:end)
+
+    ; z-buffer support (experimental).
+    (when z
+      (gl:disable :depth-test))
+
     (unset-draw-param w r g b a aa)))
 
 ;; Draw image.
-(defun image (texture x y &key (a nil) (sx 1.0) (sy 1.0) (rt 0.0) (r 1.0) (g 1.0) (b 1.0))
+(defun image (texture x y &key (a nil) (sx 1.0) (sy 1.0) (rt 0.0) (r 1.0) (g 1.0) (b 1.0) (z nil) (at nil) (manual-blend nil))
   (render-2d
     (gl:matrix-mode :modelview)
     (gl:push-matrix)
     (gl:load-identity)
-    (gl:translate x y 0.0)
+    ; z-buffer support (experimental).
+    (gl:translate x y (if z z 0.0))
     (gl:rotate rt 0.0 0.0 1.0)
     (gl:scale sx sy 0.0)
     
     (gl:bind-texture :texture-2d (id texture))
     (gl:enable :texture-2d)
-    (when a 
+
+    ; z-buffer support (experimental).
+    (when z
+      (gl:enable :depth-test))
+
+    ; alpha-test support (experimental).
+    (when at
+      (sik:enable :alpha-test)
+      (gl:alpha-func :gequal at))
+    
+    (when (and a (not manual-blend)) 
       (gl:enable :blend)
       (gl:blend-func :src-alpha :one-minus-src-alpha))
+
     (gl:color r g b (if a a 1.0))
     
     (let ((hw (/ (width texture) 2.0))
@@ -663,34 +752,63 @@
       (gl:vertex (+ hw) (+ hh) 0)
       (gl:tex-coord 0 1)
       (gl:vertex (- hw) (+ hh) 0)))  
-    
-    (when a
+
+    (when (and a (not manual-blend))
       (gl:disable :blend))
+
+    ; alpha-test support (experimental).
+    (when at
+      (sik:disable :alpha-test))
+
+    ; z-buffer support (experimental).
+    (when z
+      (gl:disable :depth-test))
+
     (gl:disable :texture-2d)
     
     (gl:pop-matrix)))
 
 ;; Draw string with bitmap character.
-(defun textb (str x y &key (r 1.0) (g 1.0) (b 1.0) (a nil) (font +bitmap-8-by-13+))
+(defun textb (str x y &key (r 1.0) (g 1.0) (b 1.0) (a nil) (font +bitmap-8-by-13+) (z nil))
   (render-2d 
     (set-draw-param nil r g b a nil)
-    (gl:raster-pos x y)
+
+    ; z-buffer support (experimental).
+    (when z
+      (gl:enable :depth-test))
+    
+    (gl:raster-pos x y (if z z 0.0))
     (loop for i from 0 below (length str) do
           (glut:bitmap-character font (char-code (aref str i))))
+
+    ; z-buffer support (experimental).
+    (when z
+      (gl:disable :depth-test))
+    
     (unset-draw-param nil r g b a nil)))
 
 ;; Draw string with stroke character.
-(defun texts (str x y &key (w 1.0) (r 1.0) (g 1.0) (b 1.0) (a nil) (aa t) (s 1.0) (sx 1.0) (sy 1.0) (rt 0.0) (font +stroke-mono-roman+))
+(defun texts (str x y &key (w 1.0) (r 1.0) (g 1.0) (b 1.0) (a nil) (aa t) (s 1.0) (sx 1.0) (sy 1.0) (rt 0.0) (font +stroke-mono-roman+) (z nil))
   (render-2d
-    (multiple-value-bind (x y z) (glu:un-project x (- (glut:width *window*) y) 0.0)
+    (multiple-value-bind (x y fz) (glu:un-project x (- (glut:width *window*) y) 0.0)
       (gl:push-matrix)
       (set-draw-param w r g b a aa)
-      (gl:translate x y z)
+
+      ; z-buffer support (experimental).
+      (when z
+        (gl:enable :depth-test))
+      
+      (gl:translate x y (if z z 0.0))
       (gl:scale (* s 0.1) (* s -0.1) 0.0)
       (gl:scale sx sy 1.0)
       (gl:rotate rt 0.0 0.0 -1.0)
       (loop for i from 0 below (length str) do
             (glut:stroke-character font (char-code (aref str i))))
+
+      ; z-buffer support (experimental).
+      (when z
+        (gl:disable :depth-test))
+      
       (unset-draw-param w r g b a aa)
       (gl:pop-matrix))))
 
@@ -997,7 +1115,51 @@
     (gl:disable :cull-face)
     (unset-draw-param w r g b a aa)))
 
+;; Draw image.
+(defun image3 (texture &key (a nil) (r 1.0) (g 1.0) (b 1.0) (at nil))
+  (render-3d
+    (sik:local
+      (sik:disable :lighting)
+
+      (when at
+        (sik:enable :alpha-test)
+        (gl:alpha-func :greater at))
+      
+      ; Alternative for alpha test.
+      ; (gl:depth-mask nil)
+      
+      (gl:bind-texture :texture-2d (id texture))
+      (gl:enable :texture-2d)
+      (when a 
+        (gl:enable :blend)
+        (gl:blend-func :src-alpha :one-minus-src-alpha))
+      (gl:color r g b (if a a 1.0))
+      
+      (let ((hw (/ (width texture) 2.0))
+            (hh (/ (height texture) 2.0))) 
+        (gl:with-primitive :quads
+        (gl:tex-coord 0 0)
+        (gl:vertex (- hw) (+ hh) 0)
+        (gl:tex-coord 1 0)
+        (gl:vertex (+ hw) (+ hh) 0)
+        (gl:tex-coord 1 1)
+        (gl:vertex (+ hw) (- hh) 0)
+        (gl:tex-coord 0 1)
+        (gl:vertex (- hw) (- hh) 0)))  
+      
+      (when a
+        (gl:disable :blend))
+      (gl:disable :texture-2d)
+
+      (when at
+        (sik:disable :alpha-test))
+
+      ; Alternative for alpha test.
+      ; (gl:depth-mask t)
+
+      (sik:enable :lighting)
+      )
+    ))
+
 (in-package :cl-user)
-
-
 
